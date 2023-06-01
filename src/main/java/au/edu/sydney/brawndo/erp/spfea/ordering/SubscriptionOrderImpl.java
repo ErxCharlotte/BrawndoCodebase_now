@@ -3,20 +3,18 @@ package au.edu.sydney.brawndo.erp.spfea.ordering;
 import au.edu.sydney.brawndo.erp.ordering.Order;
 import au.edu.sydney.brawndo.erp.ordering.Product;
 import au.edu.sydney.brawndo.erp.ordering.SubscriptionOrder;
+import au.edu.sydney.brawndo.erp.spfea.orderStrategy.DiscountStrategy;
+import au.edu.sydney.brawndo.erp.spfea.orderStrategy.TypeStrategy;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-@SuppressWarnings("Duplicates")
-public class NewOrderImplSubscription extends NewOrderImpl implements SubscriptionOrder {
+public class SubscriptionOrderImpl extends OrderImpl implements SubscriptionOrder {
     private int numShipments;
 
-    public NewOrderImplSubscription(int id, LocalDateTime date, int customerID, double discountRate, int numShipments) {
-        super(id, date, customerID, discountRate);
+    public SubscriptionOrderImpl(int id, int customerID, LocalDateTime date, DiscountStrategy discountStrategy, TypeStrategy orderType, int numShipments) {
+        super(id, customerID, date, discountStrategy, orderType);
         this.numShipments = numShipments;
     }
 
@@ -37,15 +35,14 @@ public class NewOrderImplSubscription extends NewOrderImpl implements Subscripti
 
     @Override
     public String generateInvoiceData() {
-        return String.format("Your business account will be charged: $%,.2f each week, with a total overall cost of: $%,.2f" +
-                "\nPlease see your Brawndo© merchandising representative for itemised details.", getRecurringCost(), getTotalCost());
+        return this.getOrderType().generateInvoiceDataSubscription(this, this.getProducts());
     }
 
     @Override
     public Order copy() {
         Map<Product, Integer> products = super.getProducts();
 
-        Order copy = new NewOrderImplSubscription(getOrderID(), getOrderDate(), getCustomer(), getDiscountRate(), numShipments);
+        Order copy = new SubscriptionOrderImpl(super.getOrderID(), super.getCustomer(), super.getOrderDate(), super.getDiscountStrategy(), super.getOrderType(), numShipments);
         for (Product product: products.keySet()) {
             copy.setProduct(product, products.get(product));
         }
@@ -94,7 +91,6 @@ public class NewOrderImplSubscription extends NewOrderImpl implements Subscripti
                 fullCost - discountedCost,
                 discountedCost,
                 getTotalCost()
-
         );
     }
 }

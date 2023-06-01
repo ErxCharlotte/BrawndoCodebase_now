@@ -2,28 +2,42 @@ package au.edu.sydney.brawndo.erp.spfea.ordering;
 
 import au.edu.sydney.brawndo.erp.ordering.Order;
 import au.edu.sydney.brawndo.erp.ordering.Product;
+import au.edu.sydney.brawndo.erp.spfea.orderStrategy.DiscountStrategy;
+import au.edu.sydney.brawndo.erp.spfea.orderStrategy.TypeStrategy;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/**
- * Note from Frito: this is a business customer, flat discounted order.
- */
-@SuppressWarnings("Duplicates")
-public class NewOrderImpl implements Order {
+public class OrderImpl implements Order {
     private Map<Product, Integer> products = new HashMap<>();
-    private int id;
+    private final int id;
     private LocalDateTime date;
     private int customerID;
     private double discountRate;
+    private int discountThreshold;
     private boolean finalised = false;
+    private DiscountStrategy discountStrategy;
+    private TypeStrategy orderType;
 
-    public NewOrderImpl(int id, LocalDateTime date, int customerID, double discountRate) {
+    public OrderImpl(int id, int customerID, LocalDateTime date, DiscountStrategy discountStrategy, TypeStrategy orderType) {
         this.id = id;
-        this.date = date;
         this.customerID = customerID;
-        this.discountRate = discountRate;
+        this.date = date;
+        this.discountStrategy = discountStrategy;
+        this.orderType = orderType;
+        this.discountThreshold = discountStrategy.getDiscountThreshold();
+        this.discountRate = discountStrategy.getDiscountRate();
+    }
+
+    @Override
+    public int getOrderID() {
+        return id;
+    }
+
+    @Override
+    public double getTotalCost() {
+        return this.discountStrategy.discountCalculate(this.products);
     }
 
     @Override
@@ -39,13 +53,7 @@ public class NewOrderImpl implements Order {
         // rebuilt over the network, so we had to check for presence and same values
 
         for (Product contained: products.keySet()) {
-            if (contained.getCost() == product.getCost() &&
-                    contained.getProductName().equals(product.getProductName()) &&
-                    Arrays.equals(contained.getManufacturingData(), product.getManufacturingData()) &&
-                    Arrays.equals(contained.getRecipeData(), product.getRecipeData()) &&
-                    Arrays.equals(contained.getMarketingData(), product.getMarketingData()) &&
-                    Arrays.equals(contained.getSafetyData(), product.getSafetyData()) &&
-                    Arrays.equals(contained.getLicensingData(), product.getLicensingData())) {
+            if (contained.equals(product)) {
                 product = contained;
                 break;
             }
@@ -61,24 +69,19 @@ public class NewOrderImpl implements Order {
 
     @Override
     public int getProductQty(Product product) {
-        // We can't rely on like products having the same object identity since they get
-        // rebuilt over the network, so we had to check for presence and same values
-
         for (Product contained: products.keySet()) {
-            if (contained.getCost() == product.getCost() &&
-                    contained.getProductName().equals(product.getProductName()) &&
-                    Arrays.equals(contained.getManufacturingData(), product.getManufacturingData()) &&
-                    Arrays.equals(contained.getRecipeData(), product.getRecipeData()) &&
-                    Arrays.equals(contained.getMarketingData(), product.getMarketingData()) &&
-                    Arrays.equals(contained.getSafetyData(), product.getSafetyData()) &&
-                    Arrays.equals(contained.getLicensingData(), product.getLicensingData())) {
+            if (contained.equals(product)) {
                 product = contained;
                 break;
             }
         }
-
         Integer result = products.get(product);
         return null == result ? 0 : result;
+    }
+
+    @Override
+    public String generateInvoiceData() {
+        return this.orderType.generateInvoiceData(this, this.getProducts());
     }
 
     @Override
@@ -87,47 +90,18 @@ public class NewOrderImpl implements Order {
     }
 
     @Override
+    public void finalise() {
+        this.finalised = true;
+    }
+
+    @Override
     public Order copy() {
-        Order copy = new NewOrderImpl(id, date, customerID, discountRate);
+        Order copy = new OrderImpl(id, customerID, date, discountStrategy, orderType);
         for (Product product: products.keySet()) {
             copy.setProduct(product, products.get(product));
         }
 
         return copy;
-    }
-
-    protected double getDiscountRate() {
-        return this.discountRate;
-    }
-
-    @Override
-    public String generateInvoiceData() {
-        return String.format("Your business account has been charged: $%,.2f" +
-                "\nPlease see your Brawndo© merchandising representative for itemised details.", getTotalCost());
-    }
-
-    @Override
-    public double getTotalCost() {
-        double cost = 0.0;
-        for (Product product: products.keySet()) {
-            cost +=  products.get(product) * product.getCost() * discountRate;
-        }
-        return cost;
-    }
-
-
-    protected Map<Product, Integer> getProducts() {
-        return products;
-    }
-
-    @Override
-    public int getOrderID() {
-        return id;
-    }
-
-    @Override
-    public void finalise() {
-        this.finalised = true;
     }
 
     @Override
@@ -170,7 +144,27 @@ public class NewOrderImpl implements Order {
         );
     }
 
-    protected boolean isFinalised() {
+    public int getDiscountThreshold() {
+        return discountThreshold;
+    }
+
+    public double getDiscountRate() {
+        return discountRate;
+    }
+
+    public DiscountStrategy getDiscountStrategy() {
+        return discountStrategy;
+    }
+
+    public TypeStrategy getOrderType() {
+        return orderType;
+    }
+
+    public Map<Product, Integer> getProducts() {
+        return products;
+    }
+
+    public boolean isFinalised() {
         return finalised;
     }
 }

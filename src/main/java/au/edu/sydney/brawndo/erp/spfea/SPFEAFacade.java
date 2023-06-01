@@ -2,20 +2,28 @@ package au.edu.sydney.brawndo.erp.spfea;
 
 import au.edu.sydney.brawndo.erp.auth.AuthModule;
 import au.edu.sydney.brawndo.erp.auth.AuthToken;
+import au.edu.sydney.brawndo.erp.contact.Mail;
 import au.edu.sydney.brawndo.erp.database.TestDatabase;
 import au.edu.sydney.brawndo.erp.ordering.Customer;
 import au.edu.sydney.brawndo.erp.ordering.Order;
 import au.edu.sydney.brawndo.erp.ordering.Product;
+import au.edu.sydney.brawndo.erp.spfea.changeCommand.CommandInvoker;
+import au.edu.sydney.brawndo.erp.spfea.changeCommand.CreateCommand;
+import au.edu.sydney.brawndo.erp.spfea.changeCommand.FinaliseCommand;
+import au.edu.sydney.brawndo.erp.spfea.changeCommand.UpdateCommand;
+import au.edu.sydney.brawndo.erp.spfea.contactBridge.*;
+import au.edu.sydney.brawndo.erp.spfea.orderStrategy.*;
 import au.edu.sydney.brawndo.erp.spfea.ordering.*;
 import au.edu.sydney.brawndo.erp.spfea.products.ProductDatabase;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 @SuppressWarnings("Duplicates")
 public class SPFEAFacade {
+
+    Map<Order, CommandInvoker> invokerMap = new HashMap<>();
+
     private AuthToken token;
 
     public boolean login(String userName, String password) {
@@ -64,34 +72,38 @@ public class SPFEAFacade {
         if (isSubscription) {
             if (1 == discountType) { // 1 is flat rate
                     if (isBusiness) {
-                         order = new NewOrderImplSubscription(id, date, customerID, discountRate, numShipments);
+                        order = new SubscriptionOrderImpl(id, customerID, date, new FlatDiscount(discountRate), new BusinessType(), numShipments);
                     } else {
-                        order = new Order66Subscription(id, date, discountRate, customerID, numShipments);
+                        order = new SubscriptionOrderImpl(id, customerID, date, new FlatDiscount(discountRate), new PersonalType(), numShipments);
                     }
                 } else if (2 == discountType) { // 2 is bulk discount
                     if (isBusiness) {
-                        order = new BusinessBulkDiscountSubscription(id, customerID, date, discountThreshold, discountRate, numShipments);
+                        order = new SubscriptionOrderImpl(id, customerID, date, new BulkDiscount(discountThreshold, discountRate), new BusinessType(), numShipments);
                     } else {
-                        order = new FirstOrderSubscription(id, date, discountRate, discountThreshold, customerID, numShipments);
+                        order = new SubscriptionOrderImpl(id, customerID, date, new BulkDiscount(discountThreshold, discountRate), new PersonalType(), numShipments);
                     }
             } else {return null;}
         } else {
             if (1 == discountType) {
                 if (isBusiness) {
-                    order = new NewOrderImpl(id, date, customerID, discountRate);
+                    order = new OrderImpl(id, customerID, date, new FlatDiscount(discountRate), new BusinessType());
                 } else {
-                    order = new Order66(id, date, discountRate, customerID);
+                    order = new OrderImpl(id, customerID, date, new FlatDiscount(discountRate), new PersonalType());
                 }
             } else if (2 == discountType) {
                 if (isBusiness) {
-                    order = new BusinessBulkDiscountOrder(id, customerID, date, discountThreshold, discountRate);
+                    order = new OrderImpl(id, customerID, date, new BulkDiscount(discountThreshold, discountRate), new BusinessType());
                 } else {
-                    order = new FirstOrder(id, date, discountRate, discountThreshold, customerID);
+                    order = new OrderImpl(id, customerID, date, new BulkDiscount(discountThreshold, discountRate), new PersonalType());
                 }
             } else {return null;}
         }
 
-        TestDatabase.getInstance().saveOrder(token, order);
+        this.invokerMap.put(order, new CommandInvoker());
+        CommandInvoker invoker = this.invokerMap.get(order);
+        invoker.addCommand(new CreateCommand(order));
+        invoker.execute(order, token);
+
         return order.getOrderID();
     }
 
@@ -140,22 +152,22 @@ public class SPFEAFacade {
             for (String method: contactPriority) {
                 switch (method.toLowerCase()) {
                     case "merchandiser":
-                        contactPriorityAsMethods.add(ContactMethod.MERCHANDISER);
+                        contactPriorityAsMethods.add(new MERCHANDISER());
                         break;
                     case "email":
-                        contactPriorityAsMethods.add(ContactMethod.EMAIL);
+                        contactPriorityAsMethods.add(new EMAIL());
                         break;
                     case "carrier pigeon":
-                        contactPriorityAsMethods.add(ContactMethod.CARRIER_PIGEON);
+                        contactPriorityAsMethods.add(new CARRIER_PIGEON());
                         break;
                     case "mail":
-                        contactPriorityAsMethods.add(ContactMethod.MAIL);
+                        contactPriorityAsMethods.add(new MAIL());
                         break;
                     case "phone call":
-                        contactPriorityAsMethods.add(ContactMethod.PHONECALL);
+                        contactPriorityAsMethods.add(new PHONECALL());
                         break;
                     case "sms":
-                        contactPriorityAsMethods.add(ContactMethod.SMS);
+                        contactPriorityAsMethods.add(new SMS());
                         break;
                     default:
                         break;
@@ -165,19 +177,23 @@ public class SPFEAFacade {
 
         if (contactPriorityAsMethods.size() == 0) { // needs setting to default
             contactPriorityAsMethods = Arrays.asList(
-                    ContactMethod.MERCHANDISER,
-                    ContactMethod.EMAIL,
-                    ContactMethod.CARRIER_PIGEON,
-                    ContactMethod.MAIL,
-                    ContactMethod.PHONECALL
+                    new MERCHANDISER(),
+                    new EMAIL(),
+                    new CARRIER_PIGEON(),
+                    new MAIL(),
+                    new PHONECALL()
             );
         }
 
         Order order = TestDatabase.getInstance().getOrder(token, orderID);
 
-        order.finalise();
-        TestDatabase.getInstance().saveOrder(token, order);
-        return ContactHandler.sendInvoice(token, getCustomer(order.getCustomer()), contactPriorityAsMethods, order.generateInvoiceData());
+        CommandInvoker invoker = this.invokerMap.get(order);
+        invoker.addCommand(new FinaliseCommand(order));
+        invoker.execute(order, token);
+
+        ContactHandler contactHandler = new ContactHandler();
+        contactHandler.setContactPriority(contactPriorityAsMethods);
+        return contactHandler.sendInvoice(token, getCustomer(order.getCustomer()), order.generateInvoiceData());
     }
 
     public void logout() {
@@ -210,9 +226,15 @@ public class SPFEAFacade {
             return;
         }
 
-        order.setProduct(product, qty);
+        if (invokerMap.get(order) != null){
+            CommandInvoker invoker = this.invokerMap.get(order);
+            invoker.addCommand(new UpdateCommand(order, product, qty));
+        }else{
+            this.invokerMap.put(order, new CommandInvoker());
+            CommandInvoker invoker = this.invokerMap.get(order);
+            invoker.addCommand(new UpdateCommand(order, product, qty));
+        }
 
-        TestDatabase.getInstance().saveOrder(token, order);
     }
 
     public String getOrderLongDesc(int orderID) {
